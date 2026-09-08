@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Now Playing — OBS Overlay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg-card: rgba(12,12,16,0.58);
+    --text-primary: #F5F3EE;
+    --text-secondary: #B9B6C9;
+    --text-tertiary: #7E7B90;
+    --accent: #4CE0D2;
+    --radius: 14px;
+  }
+  *{ box-sizing:border-box; }
+  html,body{
+    margin:0; padding:0;
+    width:100%; height:100%;
+    background: transparent;
+    font-family:'Space Grotesk', sans-serif;
+    overflow:hidden;
+  }
+
+  /* ---------- Painel de configuração (não aparece na captura depois de iniciado) ---------- */
+  #setup{
+    position:fixed; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    background: rgba(8,8,10,0.72);
+    backdrop-filter: blur(6px);
+    transition: opacity .5s ease;
+    z-index: 10;
+  }
+  #setup.hidden{ opacity:0; pointer-events:none; }
+  .panel{
+    width: 380px;
+    max-width: 90vw;
+    background: rgba(20,20,26,0.9);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: var(--radius);
+    padding: 28px;
+    color: var(--text-primary);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .panel h1{
+    font-size: 19px;
+    font-weight: 600;
+    margin: 0 0 4px;
+  }
+  .panel p.sub{
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin: 0 0 20px;
+    line-height: 1.5;
+  }
+  .field{ margin-bottom: 14px; }
+  .field label{
+    display:block;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+  }
+  .field input[type="text"], .field select{
+    width:100%;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.04);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 13px;
+  }
+  .field select{ appearance:none; }
+  .checkrow{
+    display:flex; align-items:center; gap:8px;
+    font-size: 12px; color: var(--text-secondary);
+    margin: 18px 0 20px;
+  }
+  .checkrow input{ accent-color: var(--accent); }
+  button#startBtn{
+    width:100%;
+    padding: 12px;
+    border-radius: 8px;
+    border: none;
+    background: var(--accent);
+    color: #04211E;
+    font-family: inherit;
+    font-weight: 600;
+    font-size: 14px;
+    cursor:pointer;
+    transition: transform .15s ease, opacity .15s ease;
+  }
+  button#startBtn:hover{ transform: translateY(-1px); }
+  button#startBtn:disabled{ opacity:.5; cursor:default; transform:none; }
+  #status{
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--text-tertiary);
+    min-height: 16px;
+  }
+  #status.error{ color: #FF8D7A; }
+  .hint{
+    font-size: 11px;
+    color: var(--text-tertiary);
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    line-height: 1.6;
+  }
+  .hint a{ color: var(--accent); }
+
+  /* ---------- Card "Now Playing" (isto é o que aparece no OBS) ---------- */
+  #card{
+    position: fixed;
+    left: 32px; bottom: 32px;
+    display:flex;
+    align-items:center;
+    gap: 16px;
+    padding: 14px;
+    background: var(--bg-card);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-radius: var(--radius);
+    border: 1px solid rgba(255,255,255,0.07);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+    transition: opacity .45s ease, transform .45s ease;
+    max-width: 460px;
+  }
+  #card.visible{ opacity:1; transform: translateY(0) scale(1); }
+
+  #art{
+    width: 76px; height: 76px;
+    border-radius: 8px;
+    background: #1c1c22 url('') center/cover no-repeat;
+    flex: 0 0 auto;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 6px 18px rgba(0,0,0,0.4);
+  }
+
+  #meta{ min-width:0; }
+  #meta .title{
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 300px;
+  }
+  #meta .artist{
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 300px;
+  }
+  #meta .album{
+    font-size: 11.5px;
+    color: var(--text-tertiary);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 300px;
+  }
+
+  #eq{
+    display:flex; align-items:flex-end; gap:3px;
+    height: 16px; margin-left: auto; flex: 0 0 auto; padding-left: 8px;
+  }
+  #eq span{
+    display:block; width:3px; border-radius: 2px;
+    background: var(--accent);
+    animation: bounce 1.1s ease-in-out infinite;
+  }
+  #eq span:nth-child(1){ animation-delay: 0s; }
+  #eq span:nth-child(2){ animation-delay: .18s; }
+  #eq span:nth-child(3){ animation-delay: .36s; }
+  @keyframes bounce{
+    0%,100%{ height: 4px; }
+    50%{ height: 16px; }
+  }
+  #eq.idle span{ animation-play-state: paused; height: 4px; opacity:.4; }
+
+  #reopenSetup{
+    position:fixed; top:12px; left:12px;
+    width:28px; height:28px;
+    border-radius:50%;
+    background: rgba(0,0,0,0.001);
+    z-index: 5;
+  }
+  #reopenSetup:hover{ background: rgba(255,255,255,0.08); cursor:pointer; }
+</style>
+</head>
+<body>
+
+  <div id="setup">
+    <div class="panel">
+      <h1>Now Playing para OBS</h1>
+      <p class="sub">Identifica a música que está tocando no seu Mac de forma contínua e mostra capa, artista, título e álbum. Use a URL deste arquivo como Browser Source no OBS.</p>
+
+      <div class="field">
+        <label for="token">Token da API de reconhecimento (AudD)</label>
+        <input type="text" id="token" placeholder="cole aqui o seu api_token">
+      </div>
+
+      <div class="field">
+        <label for="device">Entrada de áudio</label>
+        <select id="device"><option>Carregando dispositivos…</option></select>
+      </div>
+
+      <div class="checkrow">
+        <input type="checkbox" id="autostart">
+        <label for="autostart">Salvar e iniciar automaticamente ao carregar esta página (recomendado para o OBS)</label>
+      </div>
+
+      <button id="startBtn">Começar a ouvir</button>
+      <div id="status"></div>
+
+      <div class="hint">
+        Não existe API pública do Shazam para uso direto em navegador — este overlay usa a <a href="https://dashboard.audd.io" target="_blank">AudD</a>, um serviço de reconhecimento equivalente (crie um token grátis no dashboard deles).<br><br>
+        Para captar o som que está tocando no Mac (e não o microfone), instale um dispositivo de áudio virtual como o <strong>BlackHole</strong>, roteie a saída do sistema para ele (ou crie um Dispositivo Múltiplo para continuar ouvindo também) e selecione o BlackHole na lista de entradas acima.
+      </div>
+    </div>
+  </div>
+
+  <div id="reopenSetup" title="Configurações"></div>
+
+  <div id="card">
+    <div id="art"></div>
+    <div id="meta">
+      <div class="title" id="titleEl">—</div>
+      <div class="artist" id="artistEl">—</div>
+      <div class="album" id="albumEl">—</div>
+    </div>
+    <div id="eq" class="idle"><span></span><span></span><span></span></div>
+  </div>
+
+<script>
+(function(){
+  const setupEl = document.getElementById('setup');
+  const tokenInput = document.getElementById('token');
+  const deviceSelect = document.getElementById('device');
+  const autostartCheck = document.getElementById('autostart');
+  const startBtn = document.getElementById('startBtn');
+  const statusEl = document.getElementById('status');
+  const reopenBtn = document.getElementById('reopenSetup');
+
+  const cardEl = document.getElementById('card');
+  const artEl = document.getElementById('art');
+  const titleEl = document.getElementById('titleEl');
+  const artistEl = document.getElementById('artistEl');
+  const albumEl = document.getElementById('albumEl');
+  const eqEl = document.getElementById('eq');
+
+  const CHUNK_MS = 7000;   // duração de cada trecho gravado
+  const GAP_MS = 3000;     // pausa entre trechos
+
+  let running = false;
+  let currentTrackKey = '';
+  let stream = null;
+
+  // --- persistência local (só usada localmente pelo navegador que abre este arquivo) ---
+  const saved = JSON.parse(localStorage.getItem('nowplaying-config') || '{}');
+  if (saved.token) tokenInput.value = saved.token;
+  if (saved.autostart) autostartCheck.checked = true;
+
+  function setStatus(msg, isError){
+    statusEl.textContent = msg;
+    statusEl.className = isError ? 'error' : '';
+  }
+
+  async function listDevices(){
+    try{
+      // pede permissão primeiro, senão os labels dos dispositivos vêm vazios
+      const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
+      tmp.getTracks().forEach(t => t.stop());
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const inputs = devices.filter(d => d.kind === 'audioinput');
+      deviceSelect.innerHTML = '';
+      inputs.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.deviceId;
+        opt.textContent = d.label || 'Entrada de áudio';
+        deviceSelect.appendChild(opt);
+      });
+      if (saved.deviceId && inputs.some(d => d.deviceId === saved.deviceId)){
+        deviceSelect.value = saved.deviceId;
+      }
+    }catch(err){
+      setStatus('Não foi possível acessar dispositivos de áudio: ' + err.message, true);
+    }
+  }
+
+  function saveConfig(){
+    localStorage.setItem('nowplaying-config', JSON.stringify({
+      token: tokenInput.value.trim(),
+      deviceId: deviceSelect.value,
+      autostart: autostartCheck.checked
+    }));
+  }
+
+  function recordChunk(){
+    return new Promise((resolve, reject) => {
+      let recorder;
+      try{
+        recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      }catch(e){
+        reject(e); return;
+      }
+      const chunks = [];
+      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+      recorder.onstop = () => resolve(new Blob(chunks, { type: 'audio/webm' }));
+      recorder.onerror = reject;
+      recorder.start();
+      setTimeout(() => { if (recorder.state !== 'inactive') recorder.stop(); }, CHUNK_MS);
+    });
+  }
+
+  async function recognize(blob, token){
+    const form = new FormData();
+    form.append('file', blob, 'chunk.webm');
+    form.append('api_token', token);
+    form.append('return', 'apple_music,spotify');
+    const res = await fetch('https://api.audd.io/', { method: 'POST', body: form });
+    if (!res.ok) throw new Error('Falha na requisição à API (' + res.status + ')');
+    return res.json();
+  }
+
+  function bestArtwork(result){
+    if (result.apple_music && result.apple_music.artwork && result.apple_music.artwork.url){
+      return result.apple_music.artwork.url.replace('{w}', '400').replace('{h}', '400');
+    }
+    if (result.spotify && result.spotify.album && result.spotify.album.images && result.spotify.album.images.length){
+      return result.spotify.album.images[0].url;
+    }
+    return null;
+  }
+
+  function showTrack(result){
+    const key = (result.artist || '') + ' — ' + (result.title || '');
+    if (key === currentTrackKey) return; // mesma música, não reanima
+    currentTrackKey = key;
+
+    titleEl.textContent = result.title || 'Título desconhecido';
+    artistEl.textContent = result.artist || '';
+    albumEl.textContent = result.album || '';
+
+    const art = bestArtwork(result);
+    artEl.style.backgroundImage = art ? `url('${art}')` : 'none';
+
+    cardEl.classList.remove('visible');
+    requestAnimationFrame(() => requestAnimationFrame(() => cardEl.classList.add('visible')));
+  }
+
+  async function loop(token){
+    setStatus('Ouvindo o áudio…');
+    eqEl.classList.remove('idle');
+    while (running){
+      try{
+        const blob = await recordChunk();
+        const data = await recognize(blob, token);
+        if (!running) break;
+        if (data.status === 'success' && data.result){
+          showTrack(data.result);
+          setStatus('Tocando agora: ' + (data.result.artist || '') + ' — ' + (data.result.title || ''));
+        } else if (data.status === 'error'){
+          setStatus('Erro da API: ' + (data.error && data.error.error_message ? data.error.error_message : 'verifique o token'), true);
+        } else {
+          setStatus('Nenhuma correspondência neste trecho — continuando a ouvir…');
+        }
+      }catch(err){
+        setStatus('Erro: ' + err.message, true);
+      }
+      await new Promise(r => setTimeout(r, GAP_MS));
+    }
+    eqEl.classList.add('idle');
+  }
+
+  async function start(){
+    const token = tokenInput.value.trim();
+    if (!token){ setStatus('Cole o seu api_token da AudD antes de começar.', true); return; }
+    saveConfig();
+    startBtn.disabled = true;
+    setStatus('Solicitando acesso à entrada de áudio selecionada…');
+    try{
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { deviceId: deviceSelect.value ? { exact: deviceSelect.value } : undefined }
+      });
+    }catch(err){
+      setStatus('Não foi possível abrir essa entrada de áudio: ' + err.message, true);
+      startBtn.disabled = false;
+      return;
+    }
+    running = true;
+    setupEl.classList.add('hidden');
+    loop(token);
+  }
+
+  startBtn.addEventListener('click', start);
+  deviceSelect.addEventListener('change', saveConfig);
+  autostartCheck.addEventListener('change', saveConfig);
+
+  reopenBtn.addEventListener('click', () => {
+    setupEl.classList.remove('hidden');
+  });
+
+  listDevices().then(() => {
+    if (saved.autostart && saved.token){
+      // tenta iniciar sozinho — em algumas versões do navegador embutido no OBS
+      // isso funciona sem novo prompt se a permissão já foi concedida antes.
+      start();
+    }
+  });
+})();
+</script>
+</body>
+</html>
